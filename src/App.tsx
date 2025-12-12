@@ -1,119 +1,262 @@
-import { useState } from 'react';
-import {
-	Client,
-	BearerAuth,
-	FetchClient,
-	type IFetchOptions,
-} from '@c8y/client';
-import { jwtDecode } from 'jwt-decode';
-
-const API_URL = 'https://dev.hennypenny.com';
-
-let Response: { client: Client | null } = { client: null };
-
-type Decoded = {
-	aud: string;
-	sub: string;
-	nbf: number;
-	iss: string;
-	xsrfToken: string;
-	tci: string;
-	exp: number;
-	ten: string;
-	iat: number;
-	jti: string;
-	tfa: boolean;
-};
+import axios from "axios";
+import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 
 const App = () => {
-	const [username, setUsername] = useState('');
-	const [password, setPassword] = useState('');
-	const [loading, setLoading] = useState(false);
-	const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
-		e.preventDefault();
-		setLoading(true);
+  const [searchParams] = useSearchParams();
+  const [form, setForm] = useState({
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [token, setToken] = useState("");
+  const [baseURL, setBaseURL] = useState("");
 
-		const token = await Client.loginViaOAuthInternal(
-			{ user: username, password: password },
-			true,
-			API_URL
-		);
-		console.log('token response', token);
+  useEffect(() => {
+    const urlToken = searchParams.get("token");
+    const tenantDomain = searchParams.get("tenantDomain");
+    console.log(urlToken, tenantDomain, "urlToken, tenantDomain");
+    setToken(urlToken || "");
+    setBaseURL(tenantDomain || "");
+  }, [searchParams]);
 
-		if (token) {
-			let auth = new BearerAuth(token);
-			Response.client = new Client(auth, API_URL);
-			const { data: tenant } = await Response.client.tenant.current();
-			Response.client.core.tenant = tenant.name;
+  const getDashboardURL = (tenantDomain: string): string => {
+    const domainMap: { [key: string]: string } = {
+      "https://dev.hennypenny.com": "https://dashboard-dev.hennylink.com/",
+      "https://dashboard.hennypenny.com":
+        "https://dashboard-test.hennylink.com/",
+      "https://prod.hennypenny.com": "https://dashboard.hennylink.com/",
+    };
 
-			// const decoded: Decoded = jwtDecode(token);
+    const normalizedDomain = tenantDomain.replace(/\/$/, "");
+    return domainMap[normalizedDomain] || `${normalizedDomain}/login`;
+  };
 
-			// const options: IFetchOptions = {
-			// 	headers: { 'X-XSRF-TOKEN': decoded.xsrfToken },
-			// 	method: 'PUT',
-			// };
+  const calculatePasswordStrength = (password: string): string => {
+    if (!password) return "RED";
+    let score = 0;
+    if (password.length >= 8) score++;
+    if (/[a-z]/.test(password)) score++;
+    if (/[A-Z]/.test(password)) score++;
+    if (/[0-9]/.test(password)) score++;
+    if (/[~!@#$%^&*()_+\-=;:<>[\]\\|/]/.test(password)) score++;
 
-			// const fetchClient = new FetchClient(API_URL);
-			// const result = await fetchClient.fetch(
-			// 	`service/hp-commissioning-ms/1.0.0/updateUserRoles?userId=owner_operator_user01@c8y.com&parentUserId=1233@dsfsf.com&groupId=1395404`,
-			// 	options
-			// );
+    if (score === 5) return "GREEN";
+    if (score >= 3) return "YELLOW";
+    return "RED";
+  };
 
-			// console.log('fetchClient', fetchClient);
-			// console.log('fetchClient', result);
-			setLoading(false);
-		}
-	};
+  const checkRequirement = (password: string, requirement: string): boolean => {
+    if (!password) return false;
 
-	return (
-		<div className="min-h-screen flex items-center justify-center bg-gray-100">
-			<div className="bg-white shadow-lg rounded-xl p-10 w-full max-w-sm text-center">
-				<h2 className="text-3xl font-bold text-blue-600 mb-2">Login</h2>
-				<p className="text-gray-500 text-sm mb-6">
-					Hey, enter your details to sign in to your account
-				</p>
+    switch (requirement) {
+        case 'length':
+            return password.length >= 8;
+        case 'lowercase':
+            return /[a-z]/.test(password);
+        case 'uppercase':
+            return /[A-Z]/.test(password);
+        case 'number':
+            return /[0-9]/.test(password);
+        case 'symbol':
+            return /[~!@#$%^&*()_+\-=;:<>[\]\\\/|]/.test(password);
+        default:
+            return false;
+    }
+};
 
-				<form onSubmit={handleLogin} className="space-y-4 text-left">
-					<div>
-						<input
-							type="text"
-							value={username}
-							onChange={(e) => setUsername(e.target.value)}
-							className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-gray-700"
-							placeholder="Enter your username/email"
-							required
-						/>
-					</div>
+  const handleResetPassword = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
 
-					<div>
-						<input
-							type="password"
-							value={password}
-							onChange={(e) => setPassword(e.target.value)}
-							className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-gray-700"
-							placeholder="Enter your password"
-							required
-						/>
-					</div>
+    if (!token || !baseURL) {
+      alert("Reset link is missing required details.");
+      return;
+    }
 
-					<button
-						type="submit"
-						disabled={loading}
-						className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50"
-					>
-						{loading ? 'Logging in...' : 'Log In'}
-					</button>
-				</form>
+    if (form.password !== form.confirmPassword) {
+      alert("Passwords do not match");
+      return;
+    }
 
-				<p className="text-gray-500 text-sm mt-6">
-					Don’t have an account?{' '}
-					<a href="#" className="text-blue-600 font-semibold hover:underline">
-						Sign up now
-					</a>
-				</p>
-			</div>
-		</div>
-	);
+    const passwordStrength = calculatePasswordStrength(form.password);
+    const api = axios.create({
+      baseURL: baseURL,
+      timeout: 10000,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    setLoading(true);
+    try {
+      const response = await api.post("/user/passwordReset", {
+        token: token,
+        email: form.email,
+        newPassword: form.password,
+        passwordStrength: passwordStrength,
+      });
+
+      if (response.status === 200 || response.status === 201) {
+        setForm({
+          email: "",
+          password: "",
+          confirmPassword: "",
+        });
+        const dashboardURL = getDashboardURL(baseURL);
+        window.location.href = dashboardURL;
+      } else {
+        alert("Reset failed. Please try again.");
+      }
+    } catch (err) {
+      console.error("Reset password failed", err);
+      alert("Reset failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="bg-white shadow-lg rounded-xl p-10 w-full max-w-sm text-center">
+        <h2 className="text-3xl font-bold text-blue-600 mb-2">
+          Reset password
+        </h2>
+        <p className="text-gray-500 text-sm mb-6">
+          Enter your email and new password to reset your account
+        </p>
+
+        <form onSubmit={handleResetPassword} className="space-y-4 text-left">
+          <div>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, email: e.target.value }))
+              }
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-gray-700"
+              placeholder="Enter your email"
+              required
+            />
+          </div>
+
+          <div>
+            <input
+              type="password"
+              value={form.password}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, password: e.target.value }))
+              }
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-gray-700"
+              placeholder="Enter your password"
+              required
+            />
+          </div>
+
+          <div>
+            <input
+              type="password"
+              value={form.confirmPassword}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  confirmPassword: e.target.value,
+                }))
+              }
+              className="w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-gray-700"
+              placeholder="Confirm your password"
+              required
+            />
+          </div>
+          <div className="mb-6 sm:mb-8 md:mb-8">
+            <p className="text-sm sm:text-base mb-3">
+              Password must meet the requirements below:
+            </p>
+            <div className="space-y-2 sm:space-y-2.5">
+              <div className="flex items-center gap-2 sm:gap-3">
+                <span
+                  className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${
+                    checkRequirement(form.password, "length")
+                      ? "bg-green-500 text-white"
+                      : "border border-gray-400"
+                  }`}
+                >
+                  {checkRequirement(form.password, "length") && "✓"}
+                </span>
+                <span className="text-xs sm:text-sm">
+                  Must have at least 8 characters
+                </span>
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <span
+                  className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${
+                    checkRequirement(form.password, "lowercase")
+                      ? "bg-green-500 text-white"
+                      : "border border-gray-400"
+                  }`}
+                >
+                  {checkRequirement(form.password, "lowercase") && "✓"}
+                </span>
+                <span className="text-xs sm:text-sm">
+                  Include lowercase characters (for example, abcdef)
+                </span>
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <span
+                  className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${
+                    checkRequirement(form.password, "uppercase")
+                      ? "bg-green-500 text-white"
+                      : "border border-gray-400"
+                  }`}
+                >
+                  {checkRequirement(form.password, "uppercase") && "✓"}
+                </span>
+                <span className="text-xs sm:text-sm">
+                  Include uppercase characters (for example, ABCDEF)
+                </span>
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <span
+                  className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${
+                    checkRequirement(form.password, "number")
+                      ? "bg-green-500 text-white"
+                      : "border border-gray-400"
+                  }`}
+                >
+                  {checkRequirement(form.password, "number") && "✓"}
+                </span>
+                <span className="text-xs sm:text-sm">
+                  Include numbers (for example, 123456)
+                </span>
+              </div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <span
+                  className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center text-xs shrink-0 ${
+                    checkRequirement(form.password, "symbol")
+                      ? "bg-green-500 text-white"
+                      : "border border-gray-400"
+                  }`}
+                >
+                  {checkRequirement(form.password, "symbol") && "✓"}
+                </span>
+                <span className="text-xs sm:text-sm">
+                  Include symbols (for example, !@#$%^*)
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition disabled:opacity-50"
+          >
+            {loading ? "Resetting..." : "Reset Password"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
 };
 
 export default App;
